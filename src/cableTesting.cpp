@@ -25,16 +25,6 @@
 #include "button.h"
 #include <wiringPi.h>
 /* Private typedef------------------------------------------------------------------------------*/
-typedef enum
-{
-    CABLE_TESTING_STATE_IDLE = 0x00,
-    CABLE_TESTING_STATE_RUNNING,
-    CABLE_TESTING_STATE_CHECK_RESULT,
-    CABLE_TESTING_STATE_DONE,
-    CABLE_TESTING_STATE_ERROR,
-    CABLE_TESTING_TOTAL_STATE
-
-}cableTesting_state_t;
 
 typedef struct
 {
@@ -70,8 +60,8 @@ cableTesting_t cable;
 
 static bool s_buttonStart = false;
 
-static char usbSendString[]  = "USB : 152-154 Street No. 02, Van Phuc Residential City, Hiep Binh Phuoc Ward, Thu Duc City, Ho Chi Minh City, Vietnam\n";
-static char uartSendString[] = "UART : 152-154 Street No. 02, Van Phuc Residential City, Hiep Binh Phuoc Ward, Thu Duc City, Ho Chi Minh City, Vietnam\n";
+static char usbSendString[]  = "USB :abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij 152-154 Street No. 02, Van Phuc Residential City, Hiep Binh Phuoc Ward, Thu Duc City, Ho Chi Minh City, Vietnam\n";
+static char uartSendString[] = "UART :abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij 152-154 Street No. 02, Van Phuc Residential City, Hiep Binh Phuoc Ward, Thu Duc City, Ho Chi Minh City, Vietnam\n";
 
 /* Private function prototypes------------------------------------------------------------------------------*/
 
@@ -107,18 +97,15 @@ void cableTesting_SendDataProcess(void)
 {
     uint8_t sendResult[2];
 
-    for(;;)
+    if(cable.startTesting == true)
     {
-        if(cable.startTesting == true)
-        {
-            sendResult[0] = UsbPort->write_message(usbSendString, cable.usbSendStringLength);
-            sendResult[1] = UartPort->write_message(uartSendString, cable.uartSendStringLength);
+        sendResult[0] = UsbPort->write_message(usbSendString, cable.usbSendStringLength);
+        sendResult[1] = UartPort->write_message(uartSendString, cable.uartSendStringLength);
 
-            DebugInfo("Send Data Count [%d][USB:%d][UART:%d]", cable.count++, sendResult[0], sendResult[1]);
-        }
-
-        usleep(10000);
+        DebugInfo("Send Data Count [%d][USB:%d][UART:%d]", cable.count++, sendResult[0], sendResult[1]);
     }
+
+    usleep(10000);
 }
 
 void cableTesting_UsbReadProcess(void)
@@ -126,63 +113,57 @@ void cableTesting_UsbReadProcess(void)
     int readLength = 0;
     char readBuffer[MAX_READ_DATA_SIZE];
 
-    for(;;)
+    memset(readBuffer, 0, MAX_READ_DATA_SIZE);
+
+    readLength = UsbPort->read_message(readBuffer, 256);
+    if(readLength > 0)
     {
-        readLength = 0;
-        memset(readBuffer, 0, MAX_READ_DATA_SIZE);
+        // DebugInfo("\nreadLength = %d\n", readLength);
 
-        readLength = UsbPort->read_message(readBuffer, 256);
-        if(readLength > 0)
+        // printf("\nData[");
+        // for(int i = 0; i < readLength; i++)
+        // {
+        //     printf("0x%x", readBuffer[i]);
+        // }
+        // printf("]\n");
+
+        /// get data
+        memcpy(cable.usb.buffer + cable.usb.len, readBuffer, readLength);
+
+        /// get next len
+        cable.usb.len += readLength;
+
+        /// check final byte
+        if(readBuffer[readLength - 1] == '\n')
         {
-            // DebugInfo("\nreadLength = %d\n", readLength);
-
-            // printf("\nData[");
-            // for(int i = 0; i < readLength; i++)
+            // DebugInfo("cable.usb.len = %d", cable.usb.len);
+            // for(int i = 0; i < cable.usbSendStringLength; i++)
             // {
-            //     printf("0x%x", readBuffer[i]);
+            //     printf("%c", readBuffer[i]);
             // }
-            // printf("]\n");
+            // printf("\n");
 
-            /// get data
-            memcpy(cable.usb.buffer + cable.usb.len, readBuffer, readLength);
-
-            /// get next len
-            cable.usb.len += readLength;
-
-            /// check final byte
-            if(readBuffer[readLength - 1] == '\n')
+            if(cable.uartSendStringLength == cable.usb.len)
             {
-                // DebugInfo("cable.usb.len = %d", cable.usb.len);
-                // for(int i = 0; i < cable.usbSendStringLength; i++)
-                // {
-                //     printf("%c", readBuffer[i]);
-                // }
-                // printf("\n");
-
-                if(cable.uartSendStringLength == cable.usb.len)
+                if(memcmp(uartSendString, cable.usb.buffer, cable.usbSendStringLength) == 0)
                 {
-                    if(memcmp(uartSendString, cable.usb.buffer, cable.usbSendStringLength) == 0)
-                    {
-                        cable.usb.trueCount++;
-                        DebugInfo("usb find true String [%d]", cable.usb.trueCount);
-                    }
-                    else
-                    {
-                        cable.usb.falseCount++;
-                        DebugInfo("usb NOT find true String [%d]", cable.usb.falseCount);
-                    }
+                    cable.usb.trueCount++;
+                    DebugInfo("usb find true String [%d]", cable.usb.trueCount);
                 }
                 else
                 {
-                        cable.usb.falseCount++;
-                        DebugInfo("usb recieve len ERROR !!!");
-                        DebugInfo("usb NOT find true String [%d]", cable.usb.falseCount);
+                    cable.usb.falseCount++;
+                    DebugInfo("usb NOT find true String [%d]", cable.usb.falseCount);
                 }
-
-
-
-                cable.usb.len = 0;
             }
+            else
+            {
+                    cable.usb.falseCount++;
+                    DebugInfo("usb recieve len ERROR !!!");
+                    DebugInfo("usb NOT find true String [%d]", cable.usb.falseCount);
+            }
+
+            cable.usb.len = 0;
         }
     }
 
@@ -193,64 +174,63 @@ void cableTesting_UartReadProcess(void)
     int readLength = 0;
     char readBuffer[256];
 
-    DebugInfo("\nSTART UART READ THREAD !!!\n");
-
-    for(;;)
+    memset(readBuffer, 0, 256);
+    
+    readLength = UartPort->read_message(readBuffer, 256);
+    
+    if(readLength > 0)
     {
-        readLength = 0;
-        memset(readBuffer, 0, 256);
+        // DebugInfo("\nreadLength = %d\n", readLength);
 
-        readLength = UartPort->read_message(readBuffer, 256);
-        if(readLength > 0)
+        // printf("\nData[");
+        // for(int i = 0; i < readLength; i++)
+        // {
+        //     printf("0x%x", readBuffer[i]);
+        // }
+        // printf("]\n");
+
+        /// get data
+        memcpy(cable.uart.buffer + cable.uart.len, readBuffer, readLength);
+
+        /// get next len
+        cable.uart.len += readLength;
+
+        /// check final byte
+        if(readBuffer[readLength - 1] == '\n')
         {
-            // DebugInfo("\nreadLength = %d\n", readLength);
-
-            // printf("\nData[");
-            // for(int i = 0; i < readLength; i++)
+            // DebugInfo("cable.uart.len = %d", cable.uart.len);
+            // for(int i = 0; i < cable.usbSendStringLength; i++)
             // {
-            //     printf("0x%x", readBuffer[i]);
+            //     printf("%c", readBuffer[i]);
             // }
-            // printf("]\n");
-
-            /// get data
-            memcpy(cable.uart.buffer + cable.uart.len, readBuffer, readLength);
-
-            /// get next len
-            cable.uart.len += readLength;
-
-            /// check final byte
-            if(readBuffer[readLength - 1] == '\n')
+            // printf("\n");
+            if(cable.usbSendStringLength == cable.uart.len)
             {
-                // DebugInfo("cable.uart.len = %d", cable.uart.len);
-                // for(int i = 0; i < cable.usbSendStringLength; i++)
-                // {
-                //     printf("%c", readBuffer[i]);
-                // }
-                // printf("\n");
-
-                if(cable.usbSendStringLength == cable.uart.len)
+                if(memcmp(usbSendString, cable.uart.buffer, cable.uartSendStringLength) == 0)
                 {
-                    if(memcmp(usbSendString, cable.uart.buffer, cable.uartSendStringLength) == 0)
-                    {
-                        cable.uart.trueCount++;
-                        DebugInfo("uart find true String [%d]", cable.uart.trueCount);
-                    }
-                    else
-                    {
-                        cable.uart.falseCount++;
-                        DebugInfo("uart NOT find true String [%d]", cable.uart.falseCount);
-                    }
+                    cable.uart.trueCount++;
+                    DebugInfo("uart find true String [%d]", cable.uart.trueCount);
                 }
                 else
                 {
-                        cable.uart.falseCount++;
-                        DebugInfo("uart recieve len ERROR !!!");
-                        DebugInfo("uart NOT find true String [%d]", cable.uart.falseCount);
+                    for(int i = 0 ; i < cable.uart.len; i++)
+                    {
+                        printf("%c", cable.uart.buffer[i]);
+                    }
+
+                    cable.uart.falseCount++;
+                    DebugInfo("uart NOT find true String [%d]", cable.uart.falseCount);
                 }
-
-
-               cable.uart.len = 0;
             }
+            else
+            {
+                    cable.uart.falseCount++;
+                    DebugInfo("uart recieve len ERROR !!!");
+                    DebugInfo("uart NOT find true String [%d]", cable.uart.falseCount);
+            }
+
+
+            cable.uart.len = 0;
         }
     }
 
@@ -291,7 +271,7 @@ void cableTesting_manager(void)
         }
         else if(cable.state == CABLE_TESTING_STATE_RUNNING)
         {
-            if(cable.count >= 100 * 5) // 1s
+            if(cable.count >= 100 * 2) // 1s
             {
                 cable.count = 0;
 
@@ -339,6 +319,7 @@ void cableTesting_manager(void)
                 /// back to new section
                 DebugInfo("DONE - back to new section");
 
+                
                 cable.state = CABLE_TESTING_STATE_IDLE;
 
             }
@@ -382,8 +363,8 @@ void cableTesting_ledStatus(void)
     static int ledTime = 1000000;
     static bool ledState = false;
 
-    for(;;)
-    {
+    // for(;;)
+    // {
         if(cable.state == CABLE_TESTING_STATE_IDLE)
         {
             ledTime = 1000000;
@@ -410,7 +391,12 @@ void cableTesting_ledStatus(void)
         
 
         usleep(ledTime);
-    }
+    // }
 }
+
+cableTesting_state_t cableStatus(){
+    return cable.state;
+}
+
 
 /************************ (C) COPYRIGHT GREMSY *****END OF FILE****************/

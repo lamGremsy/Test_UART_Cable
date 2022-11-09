@@ -34,7 +34,16 @@
 
 #define MAX_READ_DATA_SIZE 1000
 /* Exported types ------------------------------------------------------------*/
+typedef enum
+{
+    CABLE_TESTING_STATE_IDLE = 0x00,
+    CABLE_TESTING_STATE_RUNNING,
+    CABLE_TESTING_STATE_CHECK_RESULT,
+    CABLE_TESTING_STATE_DONE,
+    CABLE_TESTING_STATE_ERROR,
+    CABLE_TESTING_TOTAL_STATE
 
+}cableTesting_state_t;
 /* Exported constants --------------------------------------------------------*/
 
 /* Exported macro ------------------------------------------------------------*/
@@ -47,6 +56,7 @@ void cableTesting_UartReadProcess(void);
 
 void cableTesting_manager(void);
 void cableTesting_ledStatus(void);
+cableTesting_state_t cableStatus();
 
 #endif /*  */
 

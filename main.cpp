@@ -1,9 +1,28 @@
 
 #include <unistd.h>
+#include <iostream>
 
 #include <sys/stat.h>
 
 #include "cableTesting.h"
+
+typedef enum
+{
+    THREAD_MANAGER_STATE_IDLE = 0x00,
+    THREAD_MANAGER_STATE_RUNNING,
+    THREAD_MANAGER_STATE_EXIT,
+    THREAD_MANAGER_TOAL_STATE
+}threadManagerState_t;
+
+typedef struct _threadManager_t
+{
+    /* data */
+    threadManagerState_t runReadUartThreadState;
+    threadManagerState_t runReadUsbThreadState;
+
+
+}threadManager_t;
+
 
 Serial_Port *UsbPort;
 Serial_Port *UartPort;
@@ -12,7 +31,9 @@ pthread_t read_uart_tid = 0;
 pthread_t button_tid = 0;
 pthread_t monitor_tid = 0;
 pthread_t write_tid = 0;
-int count = 0;
+int thread_setstate = 0;
+
+static threadManager_t s_threadManager;
 
 void quit_handler( int sig );
 void *start_read_usb_thread(void *args);
@@ -30,7 +51,15 @@ int main(int argc, char *argv[])
     result = pthread_create(&button_tid, NULL, &start_button_thread, (int *)1);
     result = pthread_create(&monitor_tid, NULL, &start_monitor_thead, (int *)1);
 
-	serialPort_init();
+    for(;;){
+        if (s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_RUNNING && thread_setstate == 0){
+            thread_setstate = 1;
+            serialPort_init();
+            
+        }
+        
+    }
+	// serialPort_init();
 
 	while(1)
 	{
@@ -70,14 +99,11 @@ void serialPort_init(void)
 	char *usb_name = (char *)"/dev/ttyUSB0";
     char *uart_name = (char *)"/dev/ttyS0";
     int baudrate = 921600;
+    // int baudrate = 9600;
 	int result = 0;
+    
 
-    /*
-     * Instantiate a serial port object
-     *
-     * This object handles the opening and closing of the offboard computer's
-     * serial port over which it will communicate to an autopilot.  It has
-     * methods to read and write a mavlink_message_t object.  To help with read
+    /*art NOT find help with read
      * and write in the context of pthreading, it gaurds port operations with a
      * pthread mutex lock.
      *
@@ -132,7 +158,7 @@ void serialPort_init(void)
     // --------------------------------------------------------------------------
     //   READ THREAD
     // --------------------------------------------------------------------------
- 
+
     result = pthread_create(&read_usb_tid, NULL, &start_read_usb_thread, (int *)1);
     result = pthread_create(&read_uart_tid, NULL, &start_read_uart_thead, (int *)1);
     result = pthread_create(&write_tid, NULL, &start_write_thread, (int *)1);
@@ -141,58 +167,124 @@ void serialPort_init(void)
 
     if (result) throw result;
 
-    // now we're reading messages
-    printf("\n");
-    // serial_port.stop();
+    for(;;){
+        if (s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_EXIT && thread_setstate == 1){
+            DebugInfo("EXIT USB - UART READ THREAD !!!");
+            pthread_cancel(read_usb_tid);
+            pthread_cancel(read_uart_tid);
+            thread_setstate = 0;
+            break;
+            
+        }
+    }
 
+    // now we're reading messages
+    // serial_port.stop();
 
 }
 // ------------------------------------------------------------------------------
 //  Pthread Starter Helper Functions
 // ------------------------------------------------------------------------------
 
-void *start_read_usb_thread(void *args)
-{
-    DebugInfo("\nSTART READ USB THREAD !!!\n");
-
-    cableTesting_UsbReadProcess();
-    // done!
-    return NULL;
-}
-
-void *start_read_uart_thead(void *args)
-{
-    cableTesting_UartReadProcess();
-    // done!
-    return NULL;
-}
-
 void *start_button_thread(void *arg)
 {
     cableTesting_manager();
-
+    
     return NULL;
 }
 
 void *start_monitor_thead(void *args)
 {
+    static cableTesting_state_t cableTestingState = CABLE_TESTING_STATE_IDLE;
+
     DebugInfo("\nSTART MONITOR THREAD !!!\n");
 
     for(;;)
     {
         cableTesting_ledStatus();
+
+        cableTestingState = cableStatus();
+
+        // std::cout << cableTestingState << "  -  " << thread_setstate << std::endl;
+
+        if(cableTestingState == CABLE_TESTING_STATE_RUNNING)
+        {
+            s_threadManager.runReadUartThreadState = THREAD_MANAGER_STATE_RUNNING;
+        }
+        else if(cableTestingState == CABLE_TESTING_STATE_DONE || cableTestingState == CABLE_TESTING_STATE_ERROR)
+        {
+            s_threadManager.runReadUartThreadState = THREAD_MANAGER_STATE_EXIT;
+        }
+        else if(cableTestingState == CABLE_TESTING_STATE_IDLE)
+        {
+            s_threadManager.runReadUartThreadState = THREAD_MANAGER_STATE_IDLE;
+        }
+
     }
 
+    return NULL;
+}
+
+void *start_read_usb_thread(void *args)
+{
+    DebugInfo("START READ USB THREAD !!!\n");
+    
+    for(;;)
+    {
+        if(s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_IDLE)
+        {
+            
+        }
+        else if(s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_RUNNING)
+        {
+            cableTesting_UsbReadProcess();
+        }
+    }
+    return NULL;
+}
+
+void *start_read_uart_thead(void *args)
+{
+    DebugInfo("START UART READ THREAD !!!\n");
+    
+    for(;;)
+    {
+        if(s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_IDLE)
+        {
+            
+        }
+        else if(s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_RUNNING)
+        {
+            cableTesting_UartReadProcess();
+            
+        }
+    }
     return NULL;
 }
 
 void *start_write_thread(void *args)
 {
     DebugInfo("START WRITE THREAD !!!");
+    
+    for(;;)
+    {
+        if(s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_IDLE)
+        {
 
-    cableTesting_SendDataProcess();
+        }
+        else if(s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_RUNNING)
+        {
+            cableTesting_SendDataProcess();
+        }
+        else if(s_threadManager.runReadUartThreadState == THREAD_MANAGER_STATE_EXIT)
+        {
+            UsbPort->stop();
+            UartPort->stop();
 
-    return NULL;
+            DebugInfo("EXIT WRITE THREAD !!!");
+            break;
+            
+        }
+    }
+    pthread_exit(NULL);
 }
-
-

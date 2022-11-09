@@ -471,7 +471,9 @@ int Serial_Port::_read_port(char *buf, int len)
 {
     // Lock
     // pthread_mutex_lock(&lock);
+    
     int result = read(fd, buf, len);
+    
     // Unlock
     // pthread_mutex_unlock(&lock);
 
